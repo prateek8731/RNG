@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import altair as alt
+import matplotlib.pyplot as plt
 from datetime import datetime
+from collections import Counter
 from io import BytesIO
 
 # --- Page Setup ---
@@ -23,6 +25,7 @@ with tabs[0]:
 
     if uploaded_file:
         df = pd.read_csv(uploaded_file)
+        df.columns = df.columns.str.strip()  # Clean column names
         st.session_state.df = df
         st.success("CSV loaded successfully!")
         st.write(df.tail())
@@ -33,12 +36,29 @@ with tabs[0]:
         st.warning("Upload a file to begin.")
 
 # --- Helper Functions ---
-def generate_prediction(n=3, low=1, high=50, count=7):
+def generate_weighted_prediction(freq, recent_draws, n=3, count=7, low=1, high=50):
     predictions = []
+    weighted_pool = []
+
+    # Frequency to weighted pool
+    for number, frequency in freq.items():
+        weighted_pool.extend([number] * frequency)
+
+    # Remove recent numbers (last 3 draws)
+    exclude = set()
+    for i in range(1, 8):
+        exclude.update(recent_draws[f"Number{i}"].tail(3).values)
+
+    # Generate unique predictions
     for _ in range(n):
-        numbers = sorted(np.random.choice(range(low, high + 1), size=count, replace=False))
+        chosen = []
+        while len(chosen) < count:
+            candidate = np.random.choice(weighted_pool)
+            if candidate not in chosen and candidate not in exclude:
+                chosen.append(candidate)
+        chosen.sort()
         bonus = np.random.randint(low, high + 1)
-        predictions.append({"Numbers": numbers, "Bonus": bonus, "Time": datetime.now()})
+        predictions.append({"Numbers": chosen, "Bonus": bonus, "Time": datetime.now()})
     return predictions
 
 def convert_df_to_csv(predictions_df):
@@ -49,7 +69,6 @@ with tabs[1]:
     st.header("Statistical Visualizations")
     if "df" in st.session_state:
         df = st.session_state.df
-        # Convert to long format for plotting
         numbers_df = df[[col for col in df.columns if col.startswith("Number")]]
         flat_series = numbers_df.values.flatten()
         value_counts = pd.Series(flat_series).value_counts().reset_index()
@@ -67,11 +86,18 @@ with tabs[1]:
 # --- Tab 3: Predictions ---
 with tabs[2]:
     st.header("Generate Predictions")
-    st.write("Click the button to simulate LottoMax number predictions.")
+    st.write("Click the button to generate AI-assisted predictions.")
 
-    if st.button("Generate Predictions"):
-        predictions = generate_prediction()
-        st.session_state.predictions = predictions
+    if st.button("🔮 Generate Predictions"):
+        if "df" in st.session_state:
+            df = st.session_state.df
+            numbers = []
+            for i in range(1, 8):
+                numbers.extend(df[f"Number{i}"].values)
+            freq = Counter(numbers)
+            st.session_state.predictions = generate_weighted_prediction(freq, df)
+        else:
+            st.warning("Upload CSV data first.")
 
     if st.session_state.predictions:
         predictions_df = pd.DataFrame([{
@@ -89,7 +115,7 @@ with tabs[2]:
 with tabs[3]:
     st.header("Logs and Debug Info")
     if "df" in st.session_state:
-        st.subheader("Basic Dataset Info")
+        st.subheader("Dataset Info")
         st.write(st.session_state.df.describe(include='all'))
         st.write("Total Draws:", len(st.session_state.df))
     if st.session_state.predictions:
